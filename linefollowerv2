@@ -1,0 +1,170 @@
+#include <QTRSensors.h>
+
+int aphase = 9;
+int aenlb = 6;
+int bphase = 5;
+int benbl = 3;
+int mode = 8;
+int lastError ;
+float P;
+float D;
+float I;
+
+int button_calibration = 12;
+int LEDpin =13;
+int button_start = 11;
+
+QTRSensors qtr;
+
+const uint8_t SensorCount = 8;
+uint16_t sensorValues[SensorCount];
+
+void setup() {
+  //Serial.begin(9600); // Initialize serial communication at 9600 baud
+  qtr.setTypeRC();
+  qtr.setSensorPins((const uint8_t[]){A0, A1, A2, A3, A4, A5, 4, 2}, SensorCount);
+  qtr.setEmitterPin(7);
+   pinMode(A0, INPUT);
+   pinMode(A1, INPUT);
+   pinMode(A2, INPUT);
+   pinMode(A3, INPUT);
+   pinMode(A4, INPUT);
+   pinMode(A5, INPUT);
+   pinMode(4, INPUT);
+   pinMode(2, INPUT);
+  pinMode(LEDpin, OUTPUT);
+
+  pinMode(aphase, OUTPUT);
+  pinMode(aenlb, OUTPUT);
+  pinMode(bphase, OUTPUT);
+  pinMode(benbl, OUTPUT);
+  pinMode(mode, OUTPUT);
+
+  pinMode(button_calibration, INPUT);
+  pinMode(button_start, INPUT); 
+
+  digitalWrite(mode, HIGH);
+
+//  Serial.println("Place the robot on the line and press the calibration button.");
+  while(digitalRead(button_calibration) == LOW) {}
+  // 10 seconds calibration
+  //Serial.println("STARTED");
+  for (uint16_t i = 0; i < 3; i++) {
+  digitalWrite(LEDpin, HIGH);
+  delay(500);
+  digitalWrite(LEDpin, LOW);
+  delay(200);
+  }
+  for (uint16_t i = 0; i < 200; i++) {
+    qtr.calibrate();
+    delay(25); // add a delay for better calibration
+  }
+
+  //Serial.println("Calibration complete. Press the start button.");
+  for (uint16_t i = 0; i < 2; i++) {
+  digitalWrite(LEDpin, HIGH);
+  delay(500);
+  digitalWrite(LEDpin, LOW);
+  delay(200);
+  }
+  while(digitalRead(button_start) == LOW) {}
+}
+
+void loop() {
+  simple_control();
+}
+
+void simple_control() {
+  uint16_t positionLine = qtr.readLineBlack(sensorValues);
+  int error = 3500 - positionLine;
+    P = error;
+    I = error + I;
+  D = error - lastError;
+  int lastError = error; 
+  //int motorSpeedChange = P * 0.05 + D * 0.0002; // Adjust the multiplier as needed
+if(positionLine > 3370 && positionLine < 3630)
+{
+  int motorSpeedChange = P * 0.05 + D * 0.002 ; // Adjust the multiplier as needed
+  int motorSpeedA = 100 + motorSpeedChange; //change this till 150
+  int motorSpeedB = 100 - motorSpeedChange;
+
+  if (motorSpeedA > 95 ) { // thi should be atleast 10 points more than what you set ex: 150 then 160 
+    motorSpeedA = 95;
+  }
+  if (motorSpeedB > 95) {
+    motorSpeedB = 95;
+  }
+  if (motorSpeedA < -60) {
+    motorSpeedA = -60;
+  }
+  if (motorSpeedB < -60) {
+    motorSpeedB = -60;
+  } 
+  forward_movement(motorSpeedA, motorSpeedB);
+//  Serial.print("Sensor Values: ");
+//  for (uint8_t i = 0; i < SensorCount; i++) {
+//    Serial.print(sensorValues[i]);
+//    Serial.print(" ");
+//  }
+//  Serial.print("\tPosition: ");
+//  Serial.print(positionLine);
+//  Serial.print("\tError: ");
+//  Serial.print(error);
+//  Serial.print("\tMotor Speeds: A = ");
+//  Serial.print(motorSpeedA);
+//  Serial.print(" B = ");
+//  Serial.println(motorSpeedB);
+}
+else {
+  int motorSpeedChange = P * 0.05 + D * 0.002; // Adjust the multiplier as needed
+   int motorSpeedA = 100 + motorSpeedChange; //80 is best when the car is 115 n above
+   int motorSpeedB = 100 - motorSpeedChange;
+  
+  if (motorSpeedA > 85 ) { 
+    motorSpeedA = 85;
+  }
+  if (motorSpeedB > 85) {
+    motorSpeedB = 85;
+  }
+  if (motorSpeedA < -60) {
+    motorSpeedA = -50;
+  }
+  if (motorSpeedB < -60) {
+    motorSpeedB = -50;
+  } 
+   forward_movement(motorSpeedA, motorSpeedB);
+//   Serial.print("Sensor Values: ");
+//  for (uint8_t i = 0; i < SensorCount; i++) {
+//    Serial.print(sensorValues[i]);
+//    Serial.print(" ");
+//  }
+//  Serial.print("\tPosition: ");
+//  Serial.print(positionLine);
+//  Serial.print("\tError: ");
+//  Serial.print(error);
+//  Serial.print("\tMotor Speeds: A = ");
+//  Serial.print(motorSpeedA);
+//  Serial.print(" B = ");
+//  Serial.println(motorSpeedB);
+  
+}
+  // Output sensor readings and motor speeds to the serial monitor
+ 
+}
+
+void forward_movement(int speedA, int speedB) {
+  if (speedA < 0) {
+    speedA = 0 - speedA;
+    digitalWrite(aphase, LOW);
+  } else {
+    digitalWrite(aphase, HIGH);
+  }
+  if (speedB < 0) {
+    speedB = 0 - speedB;
+    digitalWrite(bphase, HIGH);
+  } else {
+    digitalWrite(bphase, LOW);
+  }
+  analogWrite(aenlb, speedA);
+  analogWrite(benbl, speedB);
+}
