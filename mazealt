@@ -1,0 +1,689 @@
+int mode = 0;
+
+# define STOPPED 0
+# define FOLLOWING_LINE 1
+# define NO_LINE 2
+# define CONT_LINE 3
+# define POS_LINE 4
+# define RIGHT_TURN 5
+# define LEFT_TURN 6
+
+#define RIGHT 1
+#define LEFT -1
+
+const int power = 50;
+const int iniMotorPower = 50;
+const int adj = 0;
+float adjTurn = 8;
+int extraInch = 200;
+int adjGoAndTurn = 800;
+
+const int ledPin = 13;
+const int buttonPin = 9;
+
+// LFSensor more to the Left is "0"
+const int lineFollowSensor0 = A1; 
+const int lineFollowSensor1 = A2; 
+const int lineFollowSensor2 = A3; 
+const int lineFollowSensor3 = A4;
+const int lineFollowSensor4 = A5;
+
+const int farRightSensorPin = A0; //Analog Pin A0
+const int farLeftSensorPin = 10; //Analog Pin A0
+const int THRESHOLD = 150;
+int farRightSensor = 0;
+int farLeftSensor = 0;
+
+
+int LFSensor[5]={0, 0, 0, 0, 0};
+
+// PID controller
+float Kp=50;
+float Ki=0;
+float Kd=0;
+
+float error=0, P=0, I=0, D=0, PIDvalue=0;
+float previousError=0, previousI=0;
+
+int ain1 = 6;   // AIN1 pin for motor A
+int ain2 = 7;   // AIN2 pin for motor A
+int bin1 = 4;   // BIN1 pin for motor B
+int bin2 = 5;   // BIN2 pin for motor B
+int aenlb = 9;  // PWM pin for motor A
+int benbl = 3;  // PWM pin for motor B
+
+//-------------------------------------------------
+//Specific Maze Phase 2 (optimization) definitions and variables 
+
+unsigned char dir; 
+
+// The path variable will store the path that the robot has taken:
+//  'L' for left
+//  'R' for right
+//  'S' for straight (going straight through an intersection)
+//  'B' for back (U-turn)
+
+char path[100] = "";
+unsigned char pathLength = 0; // the length of the path
+int pathIndex = 0;
+unsigned int status = 0; // solving = 0; reach end = 1
+void setup() {
+  // Initialize your pins
+  pinMode(ledPin, OUTPUT);
+  pinMode(buttonPin, INPUT);
+  
+  // Set up line following sensor pins as input
+  pinMode(lineFollowSensor0, INPUT);
+  pinMode(lineFollowSensor1, INPUT);
+  pinMode(lineFollowSensor2, INPUT);
+  pinMode(lineFollowSensor3, INPUT);
+  pinMode(lineFollowSensor4, INPUT);
+  
+  // Set up motor control pins
+ 
+pinMode(ain1, OUTPUT);
+  pinMode(ain2, OUTPUT);
+  pinMode(bin1, OUTPUT);
+  pinMode(bin2, OUTPUT);
+  pinMode(aenlb, OUTPUT);
+  pinMode(benbl, OUTPUT);
+  
+  // Set other pins, sensors, and initialize the serial communication
+  pinMode(buttonPin, INPUT);
+  pinMode(ledPin, OUTPUT);
+ 
+  
+  // Start serial communication
+  Serial.begin(9600);
+}
+//-------------------------------------------------------------
+/* read line sensors values 
+
+Sensor Array 	Error Value
+0 0 0 0 1	 4              
+0 0 0 1 1	 3              
+0 0 0 1 0	 2              
+0 0 1 1 0	 1              
+0 0 1 0 0	 0              
+0 1 1 0 0	-1              
+0 1 0 0 0	-2              
+1 1 0 0 0	-3              
+1 0 0 0 0	-4              
+
+1 1 1 1 1        0 Robot found continuous line - test if an intersection or end of maze
+0 0 0 0 0        0 Robot found no line: turn 180o
+
+*/
+
+void readLFSsensors()
+{
+  // Read the line-following sensors
+LFSensor[0] = digitalRead(lineFollowSensor0);
+LFSensor[1] = digitalRead(lineFollowSensor1);
+LFSensor[2] = digitalRead(lineFollowSensor2);
+LFSensor[3] = digitalRead(lineFollowSensor3);
+LFSensor[4] = digitalRead(lineFollowSensor4);
+
+// Read the far right and far left sensors
+farRightSensor = digitalRead(farRightSensorPin);
+farLeftSensor = digitalRead(farLeftSensorPin);
+  int LFS0 = digitalRead(lineFollowSensor0);
+     int LFS1 = digitalRead(lineFollowSensor1);
+     int LFS2 = digitalRead(lineFollowSensor2);
+     int LFS3 = digitalRead(lineFollowSensor3);
+     int LFS4 = digitalRead(lineFollowSensor4);
+     
+    
+    
+
+if ( (LFSensor[1] == 0) && (LFSensor[2] == 0) && (LFSensor[3] == 0) && (LFSensor[4] == 0)) {
+    mode = CONT_LINE; // All sensors detect white (continue straight)
+    error = 0;
+} else if ((LFSensor[0] == 0) && (farRightSensor == 0)) {
+    mode = RIGHT_TURN; // Right sensor detects black, turn right
+    error = 0;
+} else if ((farLeftSensor == 0) && (LFSensor[4] == 0)) {
+    mode = LEFT_TURN; // Left sensor detects black, turn left
+    error = 0;
+} else if ((LFSensor[1] == 1) && (LFSensor[2] == 1) && (LFSensor[3] == 1) && (LFSensor[4] == 1)) {
+    mode = NO_LINE; // No sensors detect white (no line detected)
+    error = 0;
+} else if ((LFSensor[1] == 0) && (LFSensor[2] == 0) && (LFSensor[3] == 0) && (LFSensor[4] == 1)) {
+    mode = FOLLOWING_LINE; // Following line, left-most sensor detects white
+    error = 4;
+} else if ( (LFSensor[1] == 0) && (LFSensor[2] == 0) && (LFSensor[3] == 1) && (LFSensor[4] == 1)) {
+    mode = FOLLOWING_LINE; // Following line, 3rd and 4th sensors detect white
+    error = 3;
+} else if ( (LFSensor[1] == 0) && (LFSensor[2] == 0) && (LFSensor[3] == 1) && (LFSensor[4] == 0)) {
+    mode = FOLLOWING_LINE; // Following line, 3rd sensor detects white
+    error = 2;
+} else if ( (LFSensor[1] == 0) && (LFSensor[2] == 1) && (LFSensor[3] == 1) && (LFSensor[4] == 0)) {
+    mode = FOLLOWING_LINE; // Following line, 2nd sensor detects white
+    error = 1;
+} else if ( (LFSensor[1] == 0) && (LFSensor[2] == 1) && (LFSensor[3] == 0) && (LFSensor[4] == 0)) {
+    mode = FOLLOWING_LINE; // Following line, 2nd sensor detects white
+    error = 0;
+} else if ( (LFSensor[1] == 1) && (LFSensor[2] == 1) && (LFSensor[3] == 0) && (LFSensor[4] == 0)) {
+    mode = FOLLOWING_LINE; // Following line, 1st sensor detects white
+    error = -1;
+} else if ( (LFSensor[1] == 1) && (LFSensor[2] == 0) && (LFSensor[3] == 0) && (LFSensor[4] == 0)) {
+    mode = FOLLOWING_LINE; // Following line, 1st sensor detects white
+    error = -2;
+} else if ( (LFSensor[1] == 0) && (LFSensor[2] == 1) && (LFSensor[3] == 0) && (LFSensor[4] == 0)) {
+    mode = FOLLOWING_LINE; // Following line, 2nd sensor detects white
+    error = -3;
+} else if ( (LFSensor[1] == 1) && (LFSensor[2] == 0) && (LFSensor[3] == 0) && (LFSensor[4] == 0)) {
+    mode = FOLLOWING_LINE; // Following line, 1st sensor detects white
+    error = -4;
+}
+   Serial.print ("LFS: L  0 1 2 3 4  R ==> "); 
+     Serial.print (LFS0); 
+     Serial.print (" ");
+     Serial.print (LFS1); 
+     Serial.print (" ");
+     Serial.print (LFS2); 
+     Serial.print (" ");
+     Serial.print (LFS3); 
+     Serial.print (" ");
+     Serial.print (LFS4); 
+     Serial.print ("  ==> ");
+
+  Serial.print (farLeftSensor);
+  Serial.print (" <== LEFT  RIGH==> ");
+  Serial.print (farRightSensor);
+  Serial.print ("  mode: ");
+  Serial.print (mode);
+  Serial.print ("  error:");
+  Serial.println (error);
+    
+}
+
+//-----------------------------------------------------------
+void readLateralSensors(void)
+
+{
+  
+}
+// void ledBlink(int times)
+// {
+//    for (int i = 0; i<times; i++)
+//    { 
+//       digitalWrite (ledPin, HIGH);
+//       delay (500);con
+//       digitalWrite (ledPin, LOW);
+//       delay (500);
+//    } 
+// }
+
+//-----------------------------------------------------------------------------
+
+//  void checkBTcmd()  
+//  { 
+//    while (BT1.available())   //Check if there is an available byte to read
+//    {
+//      delay(10); //Delay added to make thing stable 
+//      char c = BT1.read(); //Conduct a serial read
+//      device += c; //build the string.
+//    }  
+//    if (device.length() > 0) 
+//    {
+//      Serial.print("Command received from BT ==> ");
+//      Serial.println(device); 
+//      command = device;
+//      device ="";  //Reset the variable
+//      BT1.flush();
+//     } 
+// }
+
+//------------------------------------------------------------------------
+void manualCmd(char g)
+{
+  switch (g)
+  {
+    case 'g':
+      mode = FOLLOWING_LINE;
+      break;
+    
+    case 's': 
+      motorStop(); //turn off both motors
+      break;
+
+    case 'f':  
+      motorForward();  
+      break;
+
+    case 'r':     
+      motorTurn(RIGHT, 30);
+      motorStop();
+      
+      break;
+
+   case 'l': 
+      motorTurn(LEFT, 30);
+      motorStop();
+      break;
+    
+    case 'b':  
+      motorBackward();
+      break;
+      
+    case 'p':
+      Kp = .01;
+      break;
+    
+    case 'i':
+      Ki = 0;
+      break; 
+    
+    case 'd':
+      Kd = 0 ;
+      break;
+  }
+}
+
+//------------------------------------------------------------------------
+
+//--------------------------------------------------------
+void calculatePID()
+{
+  P = error;
+  I = I + error;
+  D = error-previousError;
+  PIDvalue = (Kp*P) + (Ki*I) + (Kd*D);
+  previousError = error;
+}
+
+//--------------------------------------------------------
+void checkPIDvalues()
+{
+  
+
+  
+  // Serial.print("PID: ");
+  // Serial.print(Kp);
+  // Serial.print(" - ");
+  // Serial.print(Ki);
+  // Serial.print(" - ");
+  // Serial.println(Kd);  
+  
+}
+
+//-----------------------------------------------
+void testLineFollowSensors()
+{
+     int LFS0 = digitalRead(lineFollowSensor0);
+     int LFS1 = digitalRead(lineFollowSensor1);
+     int LFS2 = digitalRead(lineFollowSensor2);
+     int LFS3 = digitalRead(lineFollowSensor3);
+     int LFS4 = digitalRead(lineFollowSensor4);
+     
+     // Serial.print ("LFS: L  0 1 2 3 4  R ==> "); 
+     // Serial.print (LFS0); 
+     // Serial.print (" ");
+     // Serial.print (LFS1); 
+     // Serial.print (" ");
+     // Serial.print (LFS2); 
+     // Serial.print (" ");
+     // Serial.print (LFS3); 
+     // Serial.print (" ");
+     // Serial.print (LFS4); 
+     // Serial.print ("  ==> ");
+    
+     // Serial.print (" P: ");
+     // Serial.print (P);
+     // Serial.print (" I: ");
+     // Serial.print (I);
+     // Serial.print (" D: ");
+     // Serial.print (D);
+     // Serial.print (" PID: ");
+     // Serial.println (PIDvalue);
+}
+
+
+
+void motorStop() {
+  digitalWrite(ain1, LOW);
+  digitalWrite(ain2, LOW);
+  digitalWrite(bin1, LOW);
+  digitalWrite(bin2, LOW);
+  analogWrite(aenlb, 0); // Stop motor A
+  analogWrite(benbl, 0); // Stop motor B
+}
+
+
+//--------------------------------------------- 
+void motorForward() {
+  // Calculate speed for both motors based on power and adj values
+  int speedA = 200 - (power + adj);  // Speed calculation for motor A
+  int speedB = 200 + power;          // Speed calculation for motor B
+
+  // Check if speedA is negative (reverse direction) and set motor A direction
+  if (speedA < 0) {
+    speedA = -speedA;               // Convert to positive for PWM
+    digitalWrite(ain1, LOW);
+  digitalWrite(ain2, HIGH);
+    // Set motor A direction to reverse
+  } else {
+    speedA = speedA;               
+    digitalWrite(ain1, HIGH);
+  digitalWrite(ain2, LOW);
+    // Set motor A direction to forward
+  }
+
+  // Check if speedB is negative (reverse direction) and set motor B direction
+  if (speedB < 0) {
+    speedB = -speedB;               // Convert to positive for PWM
+    digitalWrite(bin1, LOW);
+  digitalWrite(bin2, HIGH);
+    // Set motor B direction to reverse
+  } else {
+    speedA = speedA;               
+    digitalWrite(bin1, HIGH);
+  digitalWrite(bin2, LOW);   
+    // Set motor B direction to forward
+  }
+
+  // Set motor speeds using PWM (analogWrite)
+  analogWrite(aenlb, speedA);       // Set speed for motor A
+  analogWrite(benbl, speedB);       // Set speed for motor B
+}
+
+
+//---------------------------------------------
+void motorBackward() {
+  // Calculate speed for both motors based on power and adj values
+  int speedA = 200 - (power + adj);  // Speed calculation for motor A
+  int speedB = 200 + power;          // Speed calculation for motor B
+
+  // Check if speedA is negative (forward direction when moving backward) and set motor A direction
+  if (speedA < 0) {
+    speedA = -speedA;               // Convert to positive for PWM
+     digitalWrite(ain1, HIGH);
+  digitalWrite(ain2, LOW);     // Set motor A direction to forward
+  } else {
+       digitalWrite(ain1, LOW);
+  digitalWrite(ain2, HIGH);  // Set motor A direction to reverse
+  }
+
+  // Check if speedB is negative (forward direction when moving backward) and set motor B direction
+  if (speedB < 0) {
+    speedB = -speedB;               // Convert to positive for PWM
+   digitalWrite(bin1, HIGH);
+  digitalWrite(bin2, LOW);      // Set motor B direction to forward
+  } else {
+     digitalWrite(bin1, LOW);
+  digitalWrite(bin2, HIGH);      // Set motor B direction to reverse
+  }
+
+  // Set motor speeds using PWM (analogWrite)
+  analogWrite(aenlb, speedA);       // Set speed for motor A
+  analogWrite(benbl, speedB);       // Set speed for motor B
+}
+
+
+//---------------------------------------------
+void motorFwTime(unsigned int time) {
+  motorForward();
+  delay(time);
+  motorStop();
+}
+
+//---------------------------------------------
+void motorBwTime(unsigned int time) {
+  motorBackward();
+  delay(time);
+  motorStop();
+}
+
+//------------------------------------------------
+void motorTurn(int direction, int degrees) {
+  if (direction == LEFT) {
+    // Left turn: Motor A backward, Motor B forward
+    digitalWrite(ain1, LOW);
+    digitalWrite(ain2, HIGH);
+    digitalWrite(bin1, HIGH);
+    digitalWrite(bin2, LOW);
+  } else if (direction == RIGHT) {
+    // Right turn: Motor A forward, Motor B backward
+    digitalWrite(ain1, HIGH);
+    digitalWrite(ain2, LOW);
+    digitalWrite(bin1, LOW);
+    digitalWrite(bin2, HIGH);
+  }
+
+  // Apply PWM to both motors
+  analogWrite(aenlb, power);
+  analogWrite(benbl, power);
+  
+  delay(round(adjTurn * degrees));  // Delay based on degrees
+  motorStop();  // Stop after completing the turn
+}
+
+//---------------------------------------------------
+void motorPIDcontrol() {
+  int leftMotorSpeed = constrain(iniMotorPower - PIDvalue, 0, 255);  // Adjust motor A speed using PID
+  int rightMotorSpeed = constrain(iniMotorPower + PIDvalue, 0, 255); // Adjust motor B speed using PID
+
+  // Set motor directions and speeds
+  if (leftMotorSpeed > 0) {
+    digitalWrite(ain1, HIGH);
+    digitalWrite(ain2, LOW);
+  } else {
+    digitalWrite(ain1, LOW);
+    digitalWrite(ain2, HIGH);
+    leftMotorSpeed = -leftMotorSpeed;
+  }
+
+  if (rightMotorSpeed > 0) {
+    digitalWrite(bin1, HIGH);
+    digitalWrite(bin2, LOW);
+  } else {
+    digitalWrite(bin1, LOW);
+    digitalWrite(bin2, HIGH);
+    rightMotorSpeed = -rightMotorSpeed;
+  }
+
+  analogWrite(aenlb, leftMotorSpeed);  // Apply speed to motor A
+  analogWrite(benbl, rightMotorSpeed); // Apply speed to motor B
+}
+
+//---------------------------------------------------
+void runExtraInch(void) {
+  motorPIDcontrol();
+  delay(extraInch);
+  motorStop();
+}
+
+//---------------------------------------------------
+void goAndTurn(int direction, int degrees) {
+  motorPIDcontrol();
+  delay(adjGoAndTurn);
+  motorTurn(direction, degrees);
+}
+
+void mazeSolve(void)
+{
+    while (!status)
+    {
+        readLFSsensors();  
+        switch (mode)
+        {   
+          case NO_LINE:  
+            motorStop();
+            goAndTurn (LEFT, 180);
+            recIntersection('B');
+            break;
+          
+          case CONT_LINE: 
+            runExtraInch();
+            readLFSsensors();
+            if (mode != CONT_LINE) {goAndTurn (LEFT, 90); recIntersection('L');} // or it is a "T" or "Cross"). In both cases, goes to LEFT
+            else mazeEnd(); 
+            break;
+            
+         case RIGHT_TURN: 
+            runExtraInch();
+            readLFSsensors();
+            if (mode == NO_LINE) {goAndTurn (RIGHT, 90); recIntersection('R');}
+            else recIntersection('S');
+            break;   
+            
+         case LEFT_TURN: 
+            goAndTurn (LEFT, 90); 
+            recIntersection('L');
+            break;   
+         
+         case FOLLOWING_LINE: 
+            followingLine();
+            break;      
+        
+         }
+    }
+}
+
+//---------------------------------------------
+void recIntersection(char direction)
+{
+  path[pathLength] = direction; // Store the intersection in the path variable.
+  pathLength ++;
+  simplifyPath(); // Simplify the learned path.
+}
+
+//----------------------------------------------
+void mazeEnd(void)
+{
+  motorStop();
+  // BT1.print("The End  ==> Path: ");
+  // for(int i=0;i<pathLength;i++)
+  //   BT1.print(path[i]);
+  //   //Serial.print(path[i]);
+  // BT1.println("");
+  // Serial.print("  pathLenght ==> ");
+  // Serial.println(pathLength);
+  status = 1;
+  mode = STOPPED;
+}
+
+//----------------------------------------------
+void followingLine(void)
+{
+   readLFSsensors(); 
+   calculatePID();
+   motorPIDcontrol();   
+}
+
+//------------------------------------------------------------------------------------------
+// Path simplification.  The strategy is that whenever we encounter a
+// sequence xBx, we can simplify it by cutting out the dead end.  For
+// example, LBL -> S, because a single S bypasses the dead end
+// represented by LBL.
+void simplifyPath()
+{
+  // only simplify the path if the second-to-last turn was a 'B'
+  if(pathLength < 3 || path[pathLength-2] != 'B')
+    return;
+
+  int totalAngle = 0;
+  int i;
+  for(i=1;i<=3;i++)
+  {
+    switch(path[pathLength-i])
+    {
+      case 'R':
+        totalAngle += 90;
+	break;
+      case 'L':
+	totalAngle += 270;
+	break;
+      case 'B':
+	totalAngle += 180;
+	break;
+    }
+  }
+
+  // Get the angle as a number between 0 and 360 degrees.
+  totalAngle = totalAngle % 360;
+
+  // Replace all of those turns with a single one.
+  switch(totalAngle)
+  {
+    case 0:
+	path[pathLength - 3] = 'S';
+	break;
+    case 90:
+	path[pathLength - 3] = 'R';
+	break;
+    case 180:
+	path[pathLength - 3] = 'B';
+	break;
+    case 270:
+	path[pathLength - 3] = 'L';
+	break;
+  }
+
+  // The path is now two steps shorter.
+  pathLength -= 2;
+  
+} 
+
+//----------------------------------------------------------------------------------------------
+void mazeOptimization (void)
+{
+  while (!status)
+  {
+    readLFSsensors();  
+    switch (mode)
+    {
+      case FOLLOWING_LINE:
+        followingLine();
+        break;    
+      case CONT_LINE:
+        if (pathIndex >= pathLength) mazeEnd (); 
+        else {mazeTurn (path[pathIndex]); pathIndex++;}
+        break;  
+      case LEFT_TURN:
+        if (pathIndex >= pathLength) mazeEnd (); 
+        else {mazeTurn (path[pathIndex]); pathIndex++;}
+        break;  
+      case RIGHT_TURN:
+        if (pathIndex >= pathLength) mazeEnd (); 
+        else {mazeTurn (path[pathIndex]); pathIndex++;}
+        break;   
+    }    
+   }  
+}
+
+//-----------------------------------------------------
+void mazeTurn (char dir) 
+{
+  switch(dir)
+  {
+    case 'L': // Turn Left
+       goAndTurn (LEFT, 90);      
+       break;   
+    
+    case 'R': // Turn Right
+       goAndTurn (RIGHT, 90);     
+       break;   
+       
+    case 'B': // Turn Back
+       goAndTurn (RIGHT, 800);     
+       break;   
+       
+    case 'S': // Go Straight
+       runExtraInch(); 
+       break;
+  }
+}
+void loop() {
+  if (!status) {
+    mazeSolve();  // Call the maze solving function until the maze is solved
+  } else {
+    // Check if the button is pressed to trigger maze optimization
+    if (digitalRead(buttonPin) == HIGH) {
+      mazeOptimization();  // Once the button is pressed, run maze optimization
+    } else {
+      motorStop();  // Stop the robot if the button is not pressed
+    }
+  }
+}
