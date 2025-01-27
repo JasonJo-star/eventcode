@@ -1,0 +1,127 @@
+int ain1 = 6;   // AIN1 pin for motor A
+int ain2 = 7;   // AIN2 pin for motor A
+int bin1 = 4;   // BIN1 pin for motor B
+int bin2 = 5;   // BIN2 pin for motor B
+int aenlb = 9;  // PWM pin for motor A
+int benbl = 3; 
+int lastError;
+float P;
+float D;
+float I;
+
+const uint8_t SensorCount = 8;
+uint16_t sensorValues[SensorCount];
+int sensorPins[8] = {A0, A1, A2, A3, A4, A5, 4, 2};
+
+void setup() {
+  Serial.begin(9600); // Initialize serial communication at 9600 baud
+  
+  for (int i = 0; i < SensorCount; i++) {
+    pinMode(sensorPins[i], INPUT);
+  }
+
+  pinMode(aphase, OUTPUT);
+  pinMode(aenlb, OUTPUT);
+  pinMode(bphase, OUTPUT);
+  pinMode(benbl, OUTPUT);
+
+  Serial.println("Place the robot on the line and press the calibration button.");
+  Serial.println("STARTED");
+  Serial.println("Calibration complete. Press the start button.");
+}
+
+void loop() {
+  readSensors(); // Continuously read the sensor values
+  simple_control();
+}
+
+void readSensors() {
+  // Read each sensor value and store it in the array
+  for (int i = 0; i < SensorCount; i++) {
+    sensorValues[i] = analogRead(sensorPins[i]);
+  }
+}
+
+void simple_control() {
+  uint16_t positionLine = sensorValues[4] + sensorValues[5] + sensorValues[6] + sensorValues[7];
+  int error = 850 - positionLine;
+  P = error;
+  I = error + I;
+  D = error - lastError;
+  lastError = error;
+  int motorSpeedChange = P * 0.05 + D * 0.0002; // Adjust the multiplier as needed
+
+  if (positionLine > 1000 && positionLine < 800) {
+    motorSpeedChange = P * 0.05 + D * 0.002; // Adjust the multiplier as needed
+    int motorSpeedA = 100 + motorSpeedChange;
+    int motorSpeedB = 100 - motorSpeedChange;
+
+    motorSpeedA = constrain(motorSpeedA, -60, 95);
+    motorSpeedB = constrain(motorSpeedB, -60, 95);
+
+    forward_movement(motorSpeedA, motorSpeedB);
+    printSensorData(positionLine, error, motorSpeedA, motorSpeedB);
+  } else {
+    motorSpeedChange = P * 0.05 + D * 0.002; // Adjust the multiplier as needed
+    int motorSpeedA = 100 + motorSpeedChange;
+    int motorSpeedB = 100 - motorSpeedChange;
+
+    motorSpeedA = constrain(motorSpeedA, -50, 85);
+    motorSpeedB = constrain(motorSpeedB, -50, 85);
+
+    forward_movement(motorSpeedA, motorSpeedB);
+    printSensorData(positionLine, error, motorSpeedA, motorSpeedB);
+  }
+}
+
+void forward_movement(motorSpeedA, motorSpeedB) {
+ 
+
+  // Check if speedA is negative (reverse direction) and set motor A direction
+  if (speedA < 0) {
+    speedA = -speedA;               // Convert to positive for PWM
+    digitalWrite(aphase, LOW);      // Set motor A direction to reverse
+  } else {
+    digitalWrite(aphase, HIGH);     // Set motor A direction to forward
+  }
+
+  // Check if speedB is negative (reverse direction) and set motor B direction
+  if (speedB < 0) {
+    speedB = -speedB;               // Convert to positive for PWM
+    digitalWrite(bphase, HIGH);     // Set motor B direction to reverse
+  } else {
+    digitalWrite(bphase, LOW);      // Set motor B direction to forward
+  }
+
+  // Set motor speeds using PWM (analogWrite)
+  analogWrite(aenlb, speedA);       // Set speed for motor A
+  analogWrite(benbl, speedB);       // Set speed for motor B
+}
+
+void printSensorData(uint16_t positionLine, int error, int motorSpeedA, int motorSpeedB) {
+  // Print the time elapsed since the program started in milliseconds
+  Serial.print("Time: ");
+  Serial.print(millis());
+  Serial.print(" ms\t");
+
+  // Print the sensor values
+  Serial.print("Sensor Values: ");
+  for (uint8_t i = 0; i < SensorCount; i++) {
+    Serial.print(sensorValues[i]);
+    Serial.print("\t");
+  }
+
+  // Print position, error, and motor speeds
+  Serial.print("\tPosition: ");
+  Serial.print(positionLine);
+  Serial.print("\tError: ");
+  Serial.print(error);
+  Serial.print("\tMotor Speeds: A = ");
+  Serial.print(motorSpeedA);
+  Serial.print(" B = ");
+  Serial.println(motorSpeedB);
+}
+
+
+
+
